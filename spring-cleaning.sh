@@ -58,7 +58,7 @@ fi
 confirm || exit 0
 
 i=0
-while [ $i -le ${#manual_packages[@]} ]; do
+while [ $i -lt ${#manual_packages[@]} ]; do
     p="${manual_packages[$i]}"
     clear
     echo -e "----- $i / ${#manual_packages[@]} -----"
@@ -98,4 +98,3 @@ echo "but aren't required by any package:"
 sudo pacman -Rsn $(pacman -Qdtq)
 
 explicitly_installed_packages > "$previous_file"
-
