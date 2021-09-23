@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 confirm() {
     # call with a prompt string or use a default
@@ -9,26 +10,31 @@ confirm() {
     esac
 }
 
-explicitly_installed_packages() {
-    comm -23 <(pacman -Qeq|sort) <(pacman -Qgq base base-devel|sort)
-}
-
 config_dir=~/.config/spring-cleaning
 packages_file="$config_dir/current.txt"
 previous_file="$config_dir/previous.txt"
 ignore_file="$config_dir/ignore.txt"
 mkdir -p "$config_dir"
-[ -f "$ignore_file" ] || touch "$ignore_file"
+touch "$ignore_file"
+
+# Omit the base package and everything in the base-devel group.
+base_ignored_packages=$(echo 'base'; pacman -Qq --groups base-devel)
+
+explicitly_installed_packages() {
+    comm -23 <(pacman -Qq --explicit --unrequired | sort) <(echo "$base_ignored_packages" | sort)
+}
 
 explicitly_installed_packages > "$packages_file"
 
-echo "Total packages:    $(pacman -Qq  | wc -l)"
-echo "Official packages: $(pacman -Qqn | wc -l) ($(pacman -Qeqn | wc -l) explicitly installed)"
-echo "AUR/misc packages: $(pacman -Qqm | wc -l)"
+echo "Total packages:    $(pacman -Qq | wc -l)"
+printf "Official packages: %d (%d explicitly installed)\n" \
+    "$(pacman -Qq --native | wc -l)" \
+    "$(pacman -Qq --explicit --native --unrequired | wc -l)"
+echo "AUR/misc packages: $(pacman -Qq --foreign --unrequired | wc -l)"
 echo
 
 if [ -s "$previous_file" ]; then
-    deleted_packages=($(comm -13 $packages_file <(cat $previous_file $ignore_file | sort -u)))
+    deleted_packages=($(comm -13 $packages_file <(cat $previous_file $ignore_file | sort)))
     if [ "${#deleted_packages[@]}" -gt 0 ]; then
         echo
         echo '---------------------------------'
@@ -37,7 +43,7 @@ if [ -s "$previous_file" ]; then
         echo
     fi
 
-    manual_packages=($(comm -23 $packages_file <(cat $previous_file $ignore_file | sort -u)))
+    manual_packages=($(comm -23 $packages_file <(cat $previous_file $ignore_file | sort)))
     if [ "${#manual_packages[@]}" -gt 0 ]; then
         echo
         echo '-------------------------------'
@@ -52,7 +58,10 @@ if [ -s "$previous_file" ]; then
         exit 0
     fi
 else
-    manual_packages=($(comm -23 <(pacman -Qeq | sort -u)  <(pacman -Qgq base base-devel | cat "$ignore_file" - | sort -u)))
+    manual_packages=($(comm -23 \
+        <(pacman -Qq --explicit --unrequired | sort) \
+        <((echo "$base_ignored_packages" | cat "$ignore_file" -) | sort) \
+    ))
 fi
 
 confirm || exit 0
@@ -92,9 +101,13 @@ while [ $i -lt ${#manual_packages[@]} ]; do
     i=$((i + 1))
 done
 
-echo '--------------------------------------------------------'
-echo "The following packages are marked as dependecy-installs,"
-echo "but aren't required by any package:"
-sudo pacman -Rsn $(pacman -Qdtq)
+orphans=$(pacman -Qq --unrequired --deps || true)
+if [ -n "$orphans" ]; then
+    echo '--------------------------------------------------------'
+    echo "The following packages are marked as dependency-only"
+    echo "installs, but aren't required by any package:"
+    echo
+    sudo pacman -Rsn "$orphans"
+fi
 
 explicitly_installed_packages > "$previous_file"
